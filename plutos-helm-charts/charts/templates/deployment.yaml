@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.backend.name }}
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    reloader.stakater.com/auto: {{ .Values.backend.reloader | quote }}
+  labels:
+    app: {{ .Values.backend.name }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: {{ .Values.backend.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.backend.name }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: {{ .Values.backend.name }}
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: env-secret
+              mountPath: /usr/src/app/.env
+              subPath: ENV_FILE
+              readOnly: true
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.backend.probes.livenessPath }}
+              port: {{ .Values.backend.port }}
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.backend.probes.readinessPath }}
+              port: {{ .Values.backend.port }}
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: env-secret
+          secret:
+            secretName: {{ .Values.backend.name }}-secret
+            items:
+              - key: ENV_FILE
+                path: ENV_FILE
+            defaultMode: 0440
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: {{ .Values.backend.name }}
+#   namespace: {{ .Values.global.namespace }}
+#   labels:
+#     app: {{ .Values.backend.name }}
+#     chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+# spec:
+#   {{- if not .Values.backend.autoscaling.enabled }}
+#   replicas: {{ .Values.backend.replicaCount }}
+#   {{- end }}
+#   strategy:
+#     type: RollingUpdate
+#     rollingUpdate:
+#       maxSurge: 1
+#       maxUnavailable: 0
+#   selector:
+#     matchLabels:
+#       app: {{ .Values.backend.name }}
+#   template:
+#     metadata:
+#       labels:
+#         app: {{ .Values.backend.name }}
+#     spec:
+#       terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+#       securityContext:
+#         runAsNonRoot: true
+#         runAsUser: 1000
+#       containers:
+#         - name: {{ .Values.backend.name }}
+#           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+#           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+#           ports:
+#             - containerPort: {{ .Values.backend.port }}
+#           envFrom:
+#             - secretRef:
+#                 name: {{ .Values.backend.name }}-secret
+#           resources:
+#             {{- toYaml .Values.backend.resources | nindent 12 }}
+#           livenessProbe:
+#             httpGet:
+#               path: {{ .Values.backend.probes.livenessPath }}
+#               port: {{ .Values.backend.port }}
+#             initialDelaySeconds: 30
+#             periodSeconds: 10
+#           readinessProbe:
+#             httpGet:
+#               path: {{ .Values.backend.probes.readinessPath }}
+#               port: {{ .Values.backend.port }}
+#             initialDelaySeconds: 5
+#             periodSeconds: 10

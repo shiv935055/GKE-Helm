@@ -1,0 +1,19 @@
+substitutions:
+  _LOCATION: 'asia-south1'
+  _REPOSITORY: 'plutos-uat-helm-repo'
+  _CHART_DIR: 'plutos-helm-charts/charts'
+
+logsBucket: 'gs://plutos-bbps-svc-uat-cloud-build-logs'
+options:
+  workerPool: 'projects/plutos-bbps-uat/locations/asia-south1/workerPools/plutos-uat-pvt-pool'
+
+steps:
+  - name: 'alpine/helm:3.16.2'
+    id: 'Package and Push Helm Chart'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        helm lint ${_CHART_DIR}
+        helm package ${_CHART_DIR}
+        helm push plutos-one-*.tgz oci://${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/charts
