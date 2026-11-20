@@ -1,0 +1,213 @@
+substitutions:
+  _HELM_REPOSITORY: 'plutos-uat-helm-repo'
+  _APP_REPO: 'helm-repo'
+  _CLUSTER_NAME: 'plutos-uat-cluster'
+  _CHART_VERSION: '1.0.2' # Pinned version from central chart repo
+  _ZONE: 'asia-south1'
+  _LOCATION: 'asia-south1'
+  _APP: 'csc-bou-auth-dashboard'
+  _NAMESPACE: 'csc-bou-auth-helm-reloader'
+  _ENV: 'uat' # Override to 'prod' in your Production Cloud Build trigger
+  _HELM_VALUES: 'dashboard-auth/helm/helm-chart/csc-bou-auth-uat-values.yaml'
+  _IMAGE_TAG: '${BRANCH_NAME}-${SHORT_SHA}'
+  _SONAR_HOST_URL: 'https://sonarqube.plutos.one'
+  _SONAR_PROJECT_KEY: 'BBPS-TSP-AUTH-${BRANCH_NAME}'
+  _CHART_NAME: 'plutos-one'
+
+logsBucket: 'gs://plutos-bbps-svc-uat-cloud-build-logs'
+options:
+  workerPool: 'projects/plutos-bbps-uat/locations/asia-south1/workerPools/plutos-uat-pvt-pool'
+
+steps:
+  # # 1. Fetch SonarQube Token
+  # - name: 'gcr.io/cloud-builders/gcloud'
+  #   id: 'Fetch Sonar Token'
+  #   entrypoint: 'bash'
+  #   args:
+  #     - '-c'
+  #     - 'gcloud secrets versions access latest --secret="sonar-token" > sonar_token.txt'
+
+  # # 2. Unit Tests & Coverage
+  # - name: 'node:20'
+  #   id: 'Install and Test'
+  #   entrypoint: 'bash'
+  #   args:
+  #     - '-c'
+  #     - |
+  #       cd dashboard-auth
+  #       npm ci
+  #       npm run test:cov -- --watchAll=false --forceExit
+
+  # # 3. SonarQube Scan
+  # - name: 'sonarsource/sonar-scanner-cli'
+  #   id: 'SonarQube Analysis'
+  #   args:
+  #     - '-Dsonar.host.url=${_SONAR_HOST_URL}'
+  #     - '-Dsonar.login=$(cat sonar_token.txt)'
+  #     - '-Dsonar.projectKey=${_SONAR_PROJECT_KEY}'
+  #     - '-Dsonar.sources=dashboard-auth/src'
+  #     - '-Dsonar.javascript.lcov.reportPaths=dashboard-auth/coverage/lcov.info'
+
+  # 4. Build & Push Clean Container Image (No .env baked in!)
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Build Image'
+    args:
+      - 'build'
+      - '-f'
+      - 'dashboard-auth/Dockerfile.sandbox'
+      - '-t'
+      - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_APP_REPO}/${_APP}:${_IMAGE_TAG}'
+      - '.'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'Push Image'
+    args:
+      - 'push'
+      - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_APP_REPO}/${_APP}:${_IMAGE_TAG}'
+
+  # 5. Lint, Package & Push Helm Chart to GCP Artifact Registry (OCI)
+  # - name: 'alpine/helm:3.16.2'
+  #   id: 'Package and Push Helm Chart'
+  #   entrypoint: 'sh'
+  #   args:
+  #     - '-c'
+  #     - |
+  #       helm lint dashboard-auth/helm/helm-chart -f dashboard-auth/helm/helm-chart/${_HELM_VALUES}
+  #       helm package dashboard-auth/helm/helm-chart --version "1.0.0-${SHORT_SHA:-$(echo $BUILD_ID | cut -c1-8)}" --app-version "${_IMAGE_TAG}"
+  #       helm push plutos-one-*.tgz oci://${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/charts
+
+  # 6. Authenticate to GKE & Deploy Atomically via Helm
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'Deploy with Helm'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_ZONE}" --project "${PROJECT_ID}"
+        
+        # Install Helm inside gcloud builder
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+        # Authenticate Helm directly to Artifact Registry
+        gcloud auth print-access-token | helm registry login -u oauth2accesstoken --password-stdin "https://${_LOCATION}-docker.pkg.dev"
+
+        helm upgrade --install ${_APP}-release \
+          oci://${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_HELM_REPOSITORY}/charts/plutos-one \
+          --version ${_CHART_VERSION} \
+          --namespace ${_NAMESPACE} \
+          --create-namespace \
+          -f ${_HELM_VALUES} \
+          --set backend.image.tag=${_IMAGE_TAG} \
+          --atomic \
+          --cleanup-on-fail \
+          --timeout 5m
+
+        echo "Release History:"
+        helm history ${_APP}-release -n ${_NAMESPACE} --max 5
+  
+
+
+
+
+# substitutions:
+#   _REPOSITORY: 'helm-repo'
+#   _CLUSTER_NAME: 'plutos-uat-cluster'
+#   _ZONE: 'asia-south1'
+#   _LOCATION: 'asia-south1'
+#   _APP: 'csc-bou-auth-dashboard'
+#   _NAMESPACE: 'csc-uat-bou-helm'
+#   _ENV: 'uat' # Override to 'prod' in your Production Cloud Build trigger
+#   _HELM_VALUES: 'csc-bou-auth-uat-values.yaml'
+#   _IMAGE_TAG: '${BRANCH_NAME}-${SHORT_SHA}'
+#   _SONAR_HOST_URL: 'https://sonarqube.plutos.one'
+#   _SONAR_PROJECT_KEY: 'BBPS-TSP-AUTH-${BRANCH_NAME}'
+
+# logsBucket: 'gs://plutos-bbps-svc-uat-cloud-build-logs'
+# options:
+#   workerPool: 'projects/plutos-bbps-uat/locations/asia-south1/workerPools/plutos-uat-pvt-pool'
+
+# steps:
+#   # # 1. Fetch SonarQube Token
+#   # - name: 'gcr.io/cloud-builders/gcloud'
+#   #   id: 'Fetch Sonar Token'
+#   #   entrypoint: 'bash'
+#   #   args:
+#   #     - '-c'
+#   #     - 'gcloud secrets versions access latest --secret="sonar-token" > sonar_token.txt'
+
+#   # # 2. Unit Tests & Coverage
+#   # - name: 'node:20'
+#   #   id: 'Install and Test'
+#   #   entrypoint: 'bash'
+#   #   args:
+#   #     - '-c'
+#   #     - |
+#   #       cd dashboard-auth
+#   #       npm ci
+#   #       npm run test:cov -- --watchAll=false --forceExit
+
+#   # # 3. SonarQube Scan
+#   # - name: 'sonarsource/sonar-scanner-cli'
+#   #   id: 'SonarQube Analysis'
+#   #   args:
+#   #     - '-Dsonar.host.url=${_SONAR_HOST_URL}'
+#   #     - '-Dsonar.login=$(cat sonar_token.txt)'
+#   #     - '-Dsonar.projectKey=${_SONAR_PROJECT_KEY}'
+#   #     - '-Dsonar.sources=dashboard-auth/src'
+#   #     - '-Dsonar.javascript.lcov.reportPaths=dashboard-auth/coverage/lcov.info'
+
+#   # 4. Build & Push Clean Container Image (No .env baked in!)
+#   - name: 'gcr.io/cloud-builders/docker'
+#     id: 'Build Image'
+#     args:
+#       - 'build'
+#       - '-f'
+#       - 'dashboard-auth/Dockerfile.sandbox'
+#       - '-t'
+#       - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_APP}:${_IMAGE_TAG}'
+#       - '.'
+
+#   - name: 'gcr.io/cloud-builders/docker'
+#     id: 'Push Image'
+#     args:
+#       - 'push'
+#       - '${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_APP}:${_IMAGE_TAG}'
+
+#   # 5. Lint, Package & Push Helm Chart to GCP Artifact Registry (OCI)
+#   - name: 'alpine/helm:3.16.2'
+#     id: 'Package and Push Helm Chart'
+#     entrypoint: 'sh'
+#     args:
+#       - '-c'
+#       - |
+#         helm lint dashboard-auth/helm/helm-chart -f dashboard-auth/helm/helm-chart/${_HELM_VALUES}
+#         helm package dashboard-auth/helm/helm-chart --version "1.0.0-${SHORT_SHA:-$(echo $BUILD_ID | cut -c1-8)}" --app-version "${_IMAGE_TAG}"
+#         helm push plutos-one-*.tgz oci://${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/charts
+
+#   # 6. Authenticate to GKE & Deploy Atomically via Helm
+#   - name: 'gcr.io/cloud-builders/gcloud'
+#     id: 'Deploy with Helm'
+#     entrypoint: 'bash'
+#     args:
+#       - '-c'
+#       - |
+#         gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_ZONE}" --project "${PROJECT_ID}"
+        
+#         # Install Helm inside gcloud builder
+#         curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+#         # Authenticate Helm directly to Artifact Registry
+#         gcloud auth print-access-token | helm registry login -u oauth2accesstoken --password-stdin "https://${_LOCATION}-docker.pkg.dev"
+
+#         helm upgrade --install csc-bou-auth-release \
+#           oci://${_LOCATION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/charts/plutos-one \
+#           --version "1.0.0-${SHORT_SHA:-$(echo $BUILD_ID | cut -c1-8)}" \
+#           --namespace ${_NAMESPACE} \
+#           --create-namespace \
+#           -f dashboard-auth/helm/helm-chart/${_HELM_VALUES} \
+#           --set backend.image.tag=${_IMAGE_TAG} \
+#           --timeout 5m
+
+#         echo "Release History:"
+#         helm history csc-bou-auth-release -n ${_NAMESPACE} --max 5
+  
