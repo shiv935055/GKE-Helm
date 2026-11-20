@@ -1,9 +1,9 @@
 substitutions:
   _LOCATION: 'asia-south1'
-  _REPOSITORY: 'plutos-uat-helm-repo'
+  _REPOSITORY: 'uat-helm-repo'
   _CHART_DIR: 'plutos-helm-charts/charts'
 
-logsBucket: 'gs://plutos-bbps-svc-uat-cloud-build-logs'
+logsBucket: 'gs://uat-cloud-build-logs'
 options:
   workerPool: 'projects/plutos-bbps-uat/locations/asia-south1/workerPools/plutos-uat-pvt-pool'
 
