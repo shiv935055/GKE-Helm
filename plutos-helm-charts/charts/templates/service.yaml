@@ -1,16 +1,75 @@
+{{- $svcPort := .Values.backend.service.port | default 80 | toString -}}
+{{- $svcType := .Values.backend.service.type | default "ClusterIP" -}}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ .Values.backend.name }}
   namespace: {{ .Values.global.namespace }}
+  {{- $neg := .Values.backend.service.neg | default dict -}}
+  {{- $hasNeg := and $neg.enabled (or $neg.ingress $neg.exposedPortsEnabled) -}}
+  {{- $hasInternalLb := and (eq $svcType "LoadBalancer") .Values.backend.service.internalLoadBalancer -}}
+  {{- if or $hasNeg $hasInternalLb }}
   annotations:
+    {{- if $hasNeg }}
+    {{- if and $neg.ingress $neg.exposedPortsEnabled }}
+    cloud.google.com/neg: '{"ingress": true, "exposed_ports": {"{{ $svcPort }}":{}}}'
+    {{- else if $neg.ingress }}
     cloud.google.com/neg: '{"ingress": true}'
+    {{- else if $neg.exposedPortsEnabled }}
+    cloud.google.com/neg: '{"exposed_ports": {"{{ $svcPort }}":{}}}'
+    {{- end }}
+    {{- end }}
+    {{- if $hasInternalLb }}
+    cloud.google.com/load-balancer-type: "Internal"
+    {{- end }}
+  {{- end }}
 spec:
-  type: ClusterIP
+  type: {{ $svcType }}
+  {{- if and (eq $svcType "LoadBalancer") .Values.backend.service.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.backend.service.loadBalancerIP | quote }}
+  {{- end }}
+  sessionAffinity: {{ .Values.backend.service.sessionAffinity | default "None" }}
   ports:
-    - name: http
-      port: 80
+name: http
+      port: {{ .Values.backend.service.port | default 80 }}
       targetPort: {{ .Values.backend.port }}
       protocol: TCP
   selector:
     app: {{ .Values.backend.name }}
+
+
+####################
+#Note##
+# Map each scenario to values.yaml flags
+
+
+# Scenario 1 (ClusterIP only): type: ClusterIP, neg.enabled: false
+
+
+# Scenario 2 (ClusterIP + NEG, no LB): type: ClusterIP, neg.enabled: true, neg.exposedPortsEnabled: true (or neg.ingress: true)
+
+
+# Scenario 3 (Ingress without internal LB or manual exposed_ports): type: ClusterIP, neg.enabled: true, neg.ingress: true, neg.exposedPortsEnabled: false + ingress.enabled: true
+
+
+# Scenario 4 (Internal LB + NEG, no Ingress): type: LoadBalancer, internalLoadBalancer: true, neg.enabled: true, neg.exposedPortsEnabled: true, neg.ingress: false
+
+
+# Scenario 5 (Internal LB + NEG + Ingress true): type: LoadBalancer, internalLoadBalancer: true, neg.enabled: true, neg.ingress: true + ingress.enabled: trueVerification: After helm upgrade, run kubectl get svc,ing -n <namespace> to confirm TYPE, EXTERNAL-IP, and Ingress ADDRESS.
+# ##############
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: {{ .Values.backend.name }}
+#   namespace: {{ .Values.global.namespace }}
+#   annotations:
+#     cloud.google.com/neg: '{"ingress": true}'
+# spec:
+#   type: ClusterIP
+#   ports:
+#     - name: http
+#       port: 80
+#       targetPort: {{ .Values.backend.port }}
+#       protocol: TCP
+#   selector:
+#     app: {{ .Values.backend.name }}
