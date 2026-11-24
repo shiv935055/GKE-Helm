@@ -1,35 +1,53 @@
 global:
   environment: uat
-  gcpProjectId: gcp_project_id
-  namespace: app_namespace
+  gcpProjectId: plutos-bbps-uat
+  namespace: helm-yb-cou
+
+
+
 
 ingress:
   enabled: true
-  name: ingress_name
+  name: yb-cou-switch-uat
   className: "gce-internal"
-  host: service.plutos.one
+  host: yb-uat-cou-switch.plutosone.in
+
+
+
 
 backend:
-  name: backend-service-name
+  name: yb-cou-switch
+  envmountpath: /usr/src/app/.env
+  gcpSecretName: yb-cou-switch-uat-env
   reloader: true
   replicaCount: 1
   image:
-    repository: asia-south1-docker.pkg.dev/plutos-bbps-uat/helm-repo/csc-bou-auth-dashboard
+    repository: asia-south1-docker.pkg.dev/plutos-bbps-uat/yb-cou/yb-cou-switch
     tag: "main-initial" # Overridden dynamically by Cloud Build
     pullPolicy: IfNotPresent
-  port: 7005
+  port: 3000
+  service:
+    type: LoadBalancer # "ClusterIP" or "LoadBalancer"
+    port: 80
+    internalLoadBalancer: true
+    loadBalancerIP: "192.168.1.12" # Leave "" for an auto-assigned internal IP
+    sessionAffinity: None
+    neg:
+      enabled: true
+      ingress: false
+      exposedPortsEnabled: true
   terminationGracePeriodSeconds: 120
-  gcpSecretName: gcp_secret_name # Synced via External Secrets Operator
+  gcpSecretName: yb-cou-switch-uat-env # Synced via External Secrets Operator
   probes:
-    livenessPath: /v1/readiness/health
-    readinessPath: /v1/readiness/ready
+    livenessPath: /health
+    readinessPath: /ready
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 200m
+      memory: 300Mi
     limits:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 200m
+      memory: 300Mi
   autoscaling:
     enabled: true
     minReplicas: 1
@@ -39,41 +57,19 @@ backend:
   pdb:
     minAvailable: 1
 
-frontend:
-  name: frontend_svc_name
-  replicaCount: 1
-  image:
-    repository: asia-south1-docker.pkg.dev/plutos-bbps-prod/csc-bou/csc-bou-frontend
-    tag: "main-initial"
-    pullPolicy: IfNotPresent
-  port: 8080 # Non-root Nginx port
-  probes:
-    livenessPath: /healthz
-    readinessPath: /healthz
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 250m
-      memory: 256Mi
-  autoscaling:
-    enabled: true
-    minReplicas: 1
-    maxReplicas: 4
-    targetCPUUtilizationPercentage: 75
-  pdb:
-    minAvailable: 1
+
+
+
+
 
 redis:
   enabled: true # Disabled in Prod (use GCP Memorystore); set true in values-uat.yaml
-  name: redis_service_name
+  name: yb-cou-redis
   image: redis:7-alpine
   resources:
     requests:
-      memory: "64Mi"
-      cpu: "25m"
+      memory: "128Mi"
+      cpu: "100m"
     limits:
       memory: "128Mi"
       cpu: "100m"
-  
